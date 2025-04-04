@@ -3,7 +3,7 @@ import uuid
 import time
 import threading
 from datetime import datetime, timedelta, timezone
-from flask import Flask, request, jsonify, render_template_string, send_file, abort
+from flask import Flask, request, jsonify, render_template_string, send_file, abort, render_template
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.utils import secure_filename
@@ -21,7 +21,7 @@ app = Flask(__name__)
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["200 per day", "10 per hour"],
+    default_limits=["10 per day", "5 per hour"],
     storage_uri="memory://",
     strategy="fixed-window"
 )
@@ -29,7 +29,7 @@ limiter = Limiter(
 # Configurações da Aplicação
 ALLOWED_EXTENSIONS = {'wav', 'mp3'}
 MAX_CONTENT_LENGTH = 25 * 1024 * 1024  # 25 MB
-RESULT_EXPIRATION_MINUTES = 15
+RESULT_EXPIRATION_MINUTES = 5
 
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
@@ -220,7 +220,7 @@ def analyze_transcript_with_gemini(transcript):
     try:
         # Escolhe o modelo Gemini
         # Veja modelos disponíveis: https://ai.google.dev/models/gemini
-        model = genai.GenerativeModel('gemini-1.5-flash') # Ou 'gemini-pro'
+        model = genai.GenerativeModel('gemini-2.0-flash') # Ou 'gemini-2.5-pro-exp-03-25'
 
         # Prompt detalhado para o LLM
         prompt = f"""
@@ -315,23 +315,14 @@ def process_audio_task(task_id, audio_bytes, original_filename):
 
 @app.route('/')
 def index():
-    """Serve a página HTML principal."""
+    """Serve a página HTML principal usando templates."""
     try:
-        # Tenta ler o HTML que foi criado anteriormente
-        # Idealmente, use templates/ e render_template('index.html')
-        with open("brain_dump.html", "r", encoding="utf-8") as f:
-             html_content = f.read()
-        # Substitui placeholders no HTML se necessário, ou usa render_template_string
-        return render_template_string(html_content)
-    except FileNotFoundError:
-         # Tenta servir um HTML padrão se o arquivo não for encontrado
-         print("WARN: brain_dump.html not found. Serving default.")
-         # Pode retornar um erro mais informativo ou um HTML básico
-         return "<html><body><h1>Analisador de Notas de Voz</h1><p>Erro: Arquivo de interface não encontrado.</p></body></html>", 404
+        # O Flask procura automaticamente dentro da pasta 'templates'
+        return render_template("brain_dump.html")
     except Exception as e:
-         print(f"Erro ao servir index: {e}")
-         return f"Erro interno ao carregar a página: {e}", 500
-
+        print(f"Erro ao renderizar template: {e}")
+        # Retorna um erro genérico para o utilizador
+        return "<html><body><h1>Erro Interno</h1><p>Não foi possível carregar a interface.</p></body></html>", 500
 
 @app.route('/upload', methods=['POST'])
 @limiter.limit("10 per hour") # Aplica o limite específico para este endpoint
@@ -471,12 +462,12 @@ def download_result(result_id):
 
 
 # --- Execução ---
-if __name__ == '__main__':
-    # host='0.0.0.0' permite acesso de outras máquinas na rede
-    # debug=True é útil para desenvolvimento, mas DESATIVE em produção
-    # Use uma porta diferente se a 5000 estiver ocupada
-    port = int(os.environ.get('PORT', 5000))
-    # Desativar debug em produção! O modo debug expõe informações sensíveis.
-    use_debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
-    print(f"Iniciando servidor em host 0.0.0.0 porta {port} (Debug: {use_debug})")
-    app.run(host='0.0.0.0', port=port, debug=use_debug)
+# if __name__ == '__main__':
+#     # host='0.0.0.0' permite acesso de outras máquinas na rede
+#     # debug=True é útil para desenvolvimento, mas DESATIVE em produção
+#     # Use uma porta diferente se a 5000 estiver ocupada
+#     port = int(os.environ.get('PORT', 5000))
+#     # Desativar debug em produção! O modo debug expõe informações sensíveis.
+#     use_debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+#     print(f"Iniciando servidor em host 0.0.0.0 porta {port} (Debug: {use_debug})")
+#     app.run(host='0.0.0.0', port=port, debug=use_debug)
