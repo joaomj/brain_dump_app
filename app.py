@@ -4,6 +4,8 @@ import time
 import threading
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, render_template_string, send_file, abort, render_template
+from pydub import AudioSegment
+import io
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.utils import secure_filename
@@ -327,31 +329,50 @@ def index():
 @app.route('/upload', methods=['POST'])
 @limiter.limit("10 per hour") # Aplica o limite específico para este endpoint
 def upload_audio():
-    """Recebe o arquivo de áudio, valida e inicia o processamento."""
+    """Recebe o arquivo de áudio (upload ou gravação direta), valida e inicia o processamento."""
     if not openai.api_key or not google_api_key:
         return jsonify({"detail": "Erro de configuração no servidor: APIs não inicializadas corretamente."}), 503 # Service Unavailable
 
-    if 'audio_file' not in request.files:
-        return jsonify({"detail": "Nenhum arquivo de áudio enviado."}), 400
+    # Verifica se é um upload de arquivo ou gravação direta
+    if 'audio_file' in request.files:
+        file = request.files['audio_file']
+        
+        if file.filename == '':
+            return jsonify({"detail": "Nome de arquivo vazio."}), 400
 
-    file = request.files['audio_file']
+        # Valida extensão ANTES de ler o arquivo inteiro
+        if not allowed_file(file.filename):
+            return jsonify({"detail": "Tipo de arquivo não permitido (use .wav ou .mp3)."}), 400
 
-    if file.filename == '':
-        return jsonify({"detail": "Nome de arquivo vazio."}), 400
-
-    # Valida extensão ANTES de ler o arquivo inteiro
-    if not allowed_file(file.filename):
-        return jsonify({"detail": "Tipo de arquivo não permitido (use .wav ou .mp3)."}), 400
+        try:
+            audio_bytes = file.read() # Lê o conteúdo
+            original_filename = secure_filename(file.filename)
+            
+    elif 'audio_blob' in request.files:
+        blob = request.files['audio_blob']
+        
+        try:
+            # Converte o blob de áudio para WAV usando pydub
+            audio_bytes = blob.read()
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+            
+            # Exporta para WAV em memória
+            wav_output = io.BytesIO()
+            audio_segment.export(wav_output, format="wav")
+            audio_bytes = wav_output.getvalue()
+            original_filename = "recording.wav" # Nome padrão para áudios gravados
+            
+        except Exception as e:
+            print(f"Erro na conversão de áudio: {e}")
+            return jsonify({"detail": "Erro ao processar a gravação de áudio."}), 400
+            
+    else:
+        return jsonify({"detail": "Nenhum arquivo de áudio ou gravação enviada."}), 400
 
     try:
-        # Lê o conteúdo do arquivo em memória de forma segura
-        # Verifica o tamanho ANTES de ler tudo, se possível (depende do stream)
-        # A configuração MAX_CONTENT_LENGTH do Flask já deve tratar isso, mas podemos ser explícitos
-        audio_bytes = file.read() # Lê o conteúdo
         if len(audio_bytes) > app.config['MAX_CONTENT_LENGTH']:
             return jsonify({"detail": f"Arquivo excede o limite de {MAX_CONTENT_LENGTH // (1024*1024)}MB."}), 413
 
-        original_filename = secure_filename(file.filename) # Limpa o nome do arquivo
 
         # Gera um ID único para a tarefa
         task_id = str(uuid.uuid4())
