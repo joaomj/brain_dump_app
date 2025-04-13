@@ -334,40 +334,48 @@ def upload_audio():
         return jsonify({"detail": "Erro de configuração no servidor: APIs não inicializadas corretamente."}), 503 # Service Unavailable
 
     # Verifica se é um upload de arquivo ou gravação direta
-    if 'audio_file' in request.files:
-        file = request.files['audio_file']
-        
-        if file.filename == '':
-            return jsonify({"detail": "Nome de arquivo vazio."}), 400
+    try:
+        if 'audio_file' in request.files:
+            file = request.files['audio_file']
+            
+            if file.filename == '':
+                return jsonify({"detail": "Nome de arquivo vazio."}), 400
 
-        # Valida extensão ANTES de ler o arquivo inteiro
-        if not allowed_file(file.filename):
-            return jsonify({"detail": "Tipo de arquivo não permitido (use .wav ou .mp3)."}), 400
+            # Valida extensão ANTES de ler o arquivo inteiro
+            if not allowed_file(file.filename):
+                return jsonify({"detail": "Tipo de arquivo não permitido (use .wav ou .mp3)."}), 400
 
-        try:
-            audio_bytes = file.read() # Lê o conteúdo
-            original_filename = secure_filename(file.filename)
+            try:
+                audio_bytes = file.read() # Lê o conteúdo
+                original_filename = secure_filename(file.filename)
+            except Exception as e:
+                print(f"Erro ao ler arquivo de áudio: {e}")
+                return jsonify({"detail": "Erro ao processar o arquivo de áudio."}), 400
+                
+        elif 'audio_blob' in request.files:
+            blob = request.files['audio_blob']
             
-    elif 'audio_blob' in request.files:
-        blob = request.files['audio_blob']
-        
-        try:
-            # Converte o blob de áudio para WAV usando pydub
-            audio_bytes = blob.read()
-            audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+            try:
+                # Converte o blob de áudio para WAV usando pydub
+                audio_bytes = blob.read()
+                audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+                
+                # Exporta para WAV em memória
+                wav_output = io.BytesIO()
+                audio_segment.export(wav_output, format="wav")
+                audio_bytes = wav_output.getvalue()
+                original_filename = "recording.wav" # Nome padrão para áudios gravados
+                
+            except Exception as e:
+                print(f"Erro na conversão de áudio: {e}")
+                return jsonify({"detail": "Erro ao processar a gravação de áudio."}), 400
+                
+        else:
+            return jsonify({"detail": "Nenhum arquivo de áudio ou gravação enviada."}), 400
             
-            # Exporta para WAV em memória
-            wav_output = io.BytesIO()
-            audio_segment.export(wav_output, format="wav")
-            audio_bytes = wav_output.getvalue()
-            original_filename = "recording.wav" # Nome padrão para áudios gravados
-            
-        except Exception as e:
-            print(f"Erro na conversão de áudio: {e}")
-            return jsonify({"detail": "Erro ao processar a gravação de áudio."}), 400
-            
-    else:
-        return jsonify({"detail": "Nenhum arquivo de áudio ou gravação enviada."}), 400
+    except Exception as e:
+        print(f"Erro ao processar requisição: {e}")
+        return jsonify({"detail": "Erro interno ao processar o upload."}), 500
 
     try:
         if len(audio_bytes) > app.config['MAX_CONTENT_LENGTH']:
