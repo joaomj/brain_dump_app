@@ -37,9 +37,24 @@
 
     <div class="bg-white rounded-lg shadow-xl p-8 max-w-lg w-full">
         <h1 class="text-3xl font-bold text-center text-slate-800 mb-6">🎙️ Analisador de Notas de Voz</h1>
-        <p class="text-slate-600 text-center mb-8">Faça upload de sua nota de voz (WAV ou MP3) para obter uma transcrição, resumo e próximos passos acionáveis.</p>
+        <p class="text-slate-600 text-center mb-8">Grave diretamente ou faça upload de sua nota de voz para obter uma transcrição, resumo e próximos passos acionáveis.</p>
 
-        <form id="upload-form" enctype="multipart/form-data">
+        <div class="flex justify-center gap-4 mb-6">
+            <button type="button" id="record-button" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-mic mr-2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                Gravar Áudio
+            </button>
+            <button type="button" id="stop-button" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 ease-in-out flex items-center hidden">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-square mr-2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></svg>
+                Parar Gravação
+            </button>
+        </div>
+
+        <div id="recording-status" class="text-center text-slate-600 mb-4 hidden">
+            <span id="recording-timer">00:00</span> - Gravando...
+        </div>
+
+        <form id="upload-form" enctype="multipart/form-data" class="hidden">
             <div id="upload-area" class="upload-area rounded-lg p-10 text-center cursor-pointer hover:border-slate-400">
                 <input type="file" id="audio-file" name="audio_file" accept=".wav, .mp3" class="hidden">
                 <div class="flex flex-col items-center">
@@ -77,7 +92,13 @@
         <p class="text-xs text-slate-400 text-center mt-8">Desenvolvido com ❤️ e IA</p>
     </div>
 
-    <script>
+        <script>
+        // Variáveis globais para controle da gravação
+        let mediaRecorder;
+        let audioChunks = [];
+        let recordingStartTime;
+        let timerInterval;
+
         const uploadArea = document.getElementById('upload-area');
         const fileInput = document.getElementById('audio-file');
         const browseButton = document.getElementById('browse-button');
@@ -177,7 +198,96 @@
             downloadLinkContainer.style.display = 'none';
         }
 
+        // --- Funções de Gravação ---
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    clearInterval(timerInterval);
+                    const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+                    await handleRecordedAudio(audioBlob);
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                mediaRecorder.start(100); // Coleta chunks a cada 100ms
+                recordingStartTime = Date.now();
+                updateTimer();
+                timerInterval = setInterval(updateTimer, 1000);
+                
+                // Atualiza UI
+                document.getElementById('record-button').classList.add('hidden');
+                document.getElementById('stop-button').classList.remove('hidden');
+                document.getElementById('recording-status').classList.remove('hidden');
+                document.getElementById('upload-form').classList.add('hidden');
+                
+            } catch (error) {
+                console.error('Erro ao acessar microfone:', error);
+                showError('Não foi possível acessar o microfone. Verifique as permissões.');
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+        }
+
+        function updateTimer() {
+            const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const seconds = (elapsed % 60).toString().padStart(2, '0');
+            document.getElementById('recording-timer').textContent = `${minutes}:${seconds}`;
+        }
+
+        async function handleRecordedAudio(audioBlob) {
+            try {
+                showStatus('Preparando gravação...');
+                
+                const formData = new FormData();
+                formData.append('audio_blob', audioBlob, 'recording.webm');
+                
+                // Reutiliza a lógica de upload existente
+                const uploadResponse = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!uploadResponse.ok) {
+                    const errorData = await uploadResponse.json().catch(() => ({ detail: 'Erro desconhecido no servidor.' }));
+                    throw new Error(errorData.detail || `Erro ${uploadResponse.status}`);
+                }
+
+                const uploadResult = await uploadResponse.json();
+                analysisTaskId = uploadResult.task_id;
+                checkAnalysisStatus();
+
+            } catch (error) {
+                console.error('Erro ao enviar gravação:', error);
+                showError(error.message || 'Falha no envio da gravação.');
+                resetRecordingUI();
+            }
+        }
+
+        function resetRecordingUI() {
+            document.getElementById('record-button').classList.remove('hidden');
+            document.getElementById('stop-button').classList.add('hidden');
+            document.getElementById('recording-status').classList.add('hidden');
+            document.getElementById('upload-form').classList.remove('hidden');
+            clearInterval(timerInterval);
+        }
+
         // --- Event Listeners ---
+        document.getElementById('record-button').addEventListener('click', startRecording);
+        document.getElementById('stop-button').addEventListener('click', stopRecording);
         browseButton.addEventListener('click', () => fileInput.click());
 
         fileInput.addEventListener('change', (event) => {

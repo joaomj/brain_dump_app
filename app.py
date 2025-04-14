@@ -4,6 +4,8 @@ import time
 import threading
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, render_template_string, send_file, abort, render_template
+from pydub import AudioSegment
+import io
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.utils import secure_filename
@@ -21,7 +23,7 @@ app = Flask(__name__)
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["10 per day", "5 per hour"],
+    default_limits=["50 per day", "10 per hour"],
     storage_uri="memory://",
     strategy="fixed-window"
 )
@@ -40,7 +42,7 @@ google_api_key = os.getenv("GOOGLE_API_KEY")
 if not openai.api_key:
     print("AVISO: Chave da API OpenAI não encontrada nas variáveis de ambiente (OPENAI_API_KEY). A transcrição falhará.")
 if not google_api_key:
-     print("AVISO: Chave da API Google não encontrada nas variáveis de ambiente (GOOGLE_API_KEY). A análise LLM falhará.")
+    print("AVISO: Chave da API Google não encontrada nas variáveis de ambiente (GOOGLE_API_KEY). A análise LLM falhará.")
 else:
     try:
         genai.configure(api_key=google_api_key)
@@ -82,11 +84,11 @@ def update_task_status(task_id, status, message=None, error=None, result_id=None
             if result_id is not None:
                 task['result_id'] = result_id
             if status in ['completed', 'failed']:
-                 # Define o tempo de expiração do status da tarefa também (ex: 1 hora após conclusão/falha)
-                 task['expires_at'] = datetime.now(timezone.utc) + timedelta(hours=1)
+                # Define o tempo de expiração do status da tarefa também (ex: 1 hora após conclusão/falha)
+                task['expires_at'] = datetime.now(timezone.utc) + timedelta(hours=1)
             print(f"Task {task_id} updated: Status={status}, Message={message}, Error={error}") # Log de atualização
         else:
-             print(f"Warning: Attempted to update non-existent task {task_id}")
+            print(f"Warning: Attempted to update non-existent task {task_id}")
 
 
 def store_result(result_id, content, filename):
@@ -120,8 +122,8 @@ def get_result(result_id):
                         task_to_remove = task_id
                         break
                 if task_to_remove:
-                     print(f"Removing associated task {task_to_remove} for expired result {result_id}.")
-                     del tasks[task_to_remove]
+                    print(f"Removing associated task {task_to_remove} for expired result {result_id}.")
+                    del tasks[task_to_remove]
                 return None
         return None
 
@@ -146,24 +148,24 @@ def cleanup_expired_data():
                 # Limpa resultados explicitamente expirados (caso get_result não tenha sido chamado)
                 expired_results = []
                 for result_id, data in results.items():
-                     expiration_time = data['created_at'] + timedelta(minutes=RESULT_EXPIRATION_MINUTES)
-                     if now >= expiration_time:
-                         print(f"Cleanup: Found explicitly expired result {result_id}")
-                         expired_results.append(result_id)
+                    expiration_time = data['created_at'] + timedelta(minutes=RESULT_EXPIRATION_MINUTES)
+                    if now >= expiration_time:
+                        print(f"Cleanup: Found explicitly expired result {result_id}")
+                        expired_results.append(result_id)
 
                 for result_id in expired_results:
-                     if result_id in results: # Verifica novamente
-                         print(f"Cleanup: Removing expired result {result_id}")
-                         del results[result_id]
-                         # Remove a tarefa associada se existir e não estiver processando
-                         task_to_remove = None
-                         for task_id, task_info in tasks.items():
-                              if task_info.get('result_id') == result_id and task_info.get('status') != 'processing':
-                                   task_to_remove = task_id
-                                   break
-                         if task_to_remove and task_to_remove in tasks:
-                              print(f"Cleanup: Removing associated task {task_to_remove}")
-                              del tasks[task_to_remove]
+                    if result_id in results: # Verifica novamente
+                        print(f"Cleanup: Removing expired result {result_id}")
+                        del results[result_id]
+                        # Remove a tarefa associada se existir e não estiver processando
+                        task_to_remove = None
+                        for task_id, task_info in tasks.items():
+                            if task_info.get('result_id') == result_id and task_info.get('status') != 'processing':
+                                task_to_remove = task_id
+                                break
+                        if task_to_remove and task_to_remove in tasks:
+                            print(f"Cleanup: Removing associated task {task_to_remove}")
+                            del tasks[task_to_remove]
 
         except Exception as e:
             print(f"Error during cleanup: {e}") # Log do erro
@@ -214,7 +216,7 @@ def transcribe_audio_with_whisper(audio_bytes, original_filename):
 def analyze_transcript_with_gemini(transcript):
     """Analisa a transcrição usando a API Gemini do Google."""
     if not google_api_key:
-         raise ValueError("Chave da API Google (Gemini) não configurada.")
+        raise ValueError("Chave da API Google (Gemini) não configurada.")
 
     print("Iniciando análise com Gemini...")
     try:
@@ -299,8 +301,8 @@ def process_audio_task(task_id, audio_bytes, original_filename):
         print(f"Tarefa {task_id} concluída com sucesso em {total_time:.2f}s.")
 
     except ValueError as e: # Erro de configuração (ex: chave API faltando)
-         print(f"Erro de configuração na tarefa {task_id}: {e}")
-         update_task_status(task_id, 'failed', error=f"Erro de configuração: {e}")
+        print(f"Erro de configuração na tarefa {task_id}: {e}")
+        update_task_status(task_id, 'failed', error=f"Erro de configuração: {e}")
     except openai.APIError as e:
         print(f"Erro de API OpenAI na tarefa {task_id}: {e}")
         update_task_status(task_id, 'failed', error=f"Erro na API de transcrição: {e.status_code}")
@@ -327,31 +329,58 @@ def index():
 @app.route('/upload', methods=['POST'])
 @limiter.limit("10 per hour") # Aplica o limite específico para este endpoint
 def upload_audio():
-    """Recebe o arquivo de áudio, valida e inicia o processamento."""
+    """Recebe o arquivo de áudio (upload ou gravação direta), valida e inicia o processamento."""
     if not openai.api_key or not google_api_key:
-         return jsonify({"detail": "Erro de configuração no servidor: APIs não inicializadas corretamente."}), 503 # Service Unavailable
+        return jsonify({"detail": "Erro de configuração no servidor: APIs não inicializadas corretamente."}), 503 # Service Unavailable
 
-    if 'audio_file' not in request.files:
-        return jsonify({"detail": "Nenhum arquivo de áudio enviado."}), 400
+    # Verifica se é um upload de arquivo ou gravação direta
+    try:
+        if 'audio_file' in request.files:
+            file = request.files['audio_file']
+            
+            if file.filename == '':
+                return jsonify({"detail": "Nome de arquivo vazio."}), 400
 
-    file = request.files['audio_file']
+            # Valida extensão ANTES de ler o arquivo inteiro
+            if not allowed_file(file.filename):
+                return jsonify({"detail": "Tipo de arquivo não permitido (use .wav ou .mp3)."}), 400
 
-    if file.filename == '':
-        return jsonify({"detail": "Nome de arquivo vazio."}), 400
-
-    # Valida extensão ANTES de ler o arquivo inteiro
-    if not allowed_file(file.filename):
-        return jsonify({"detail": "Tipo de arquivo não permitido (use .wav ou .mp3)."}), 400
+            try:
+                audio_bytes = file.read() # Lê o conteúdo
+                original_filename = secure_filename(file.filename)
+            except Exception as e:
+                print(f"Erro ao ler arquivo de áudio: {e}")
+                return jsonify({"detail": "Erro ao processar o arquivo de áudio."}), 400
+                
+        elif 'audio_blob' in request.files:
+            blob = request.files['audio_blob']
+            
+            try:
+                # Converte o blob de áudio para WAV usando pydub
+                audio_bytes = blob.read()
+                audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+                
+                # Exporta para WAV em memória
+                wav_output = io.BytesIO()
+                audio_segment.export(wav_output, format="wav")
+                audio_bytes = wav_output.getvalue()
+                original_filename = "recording.wav" # Nome padrão para áudios gravados
+                
+            except Exception as e:
+                print(f"Erro na conversão de áudio: {e}")
+                return jsonify({"detail": "Erro ao processar a gravação de áudio."}), 400
+                
+        else:
+            return jsonify({"detail": "Nenhum arquivo de áudio ou gravação enviada."}), 400
+            
+    except Exception as e:
+        print(f"Erro ao processar requisição: {e}")
+        return jsonify({"detail": "Erro interno ao processar o upload."}), 500
 
     try:
-        # Lê o conteúdo do arquivo em memória de forma segura
-        # Verifica o tamanho ANTES de ler tudo, se possível (depende do stream)
-        # A configuração MAX_CONTENT_LENGTH do Flask já deve tratar isso, mas podemos ser explícitos
-        audio_bytes = file.read() # Lê o conteúdo
         if len(audio_bytes) > app.config['MAX_CONTENT_LENGTH']:
-             return jsonify({"detail": f"Arquivo excede o limite de {MAX_CONTENT_LENGTH // (1024*1024)}MB."}), 413
+            return jsonify({"detail": f"Arquivo excede o limite de {MAX_CONTENT_LENGTH // (1024*1024)}MB."}), 413
 
-        original_filename = secure_filename(file.filename) # Limpa o nome do arquivo
 
         # Gera um ID único para a tarefa
         task_id = str(uuid.uuid4())
@@ -393,24 +422,24 @@ def get_analysis_status(task_id):
         response["message"] = status_info.get('message', 'Concluído')
         result_id = status_info.get('result_id')
         if result_id:
-             # Verifica se o resultado ainda existe e não expirou antes de fornecer a URL
-             result_data = get_result(result_id) # get_result já lida com expiração
-             if result_data:
-                 response["download_url"] = f"/download/{result_id}"
-                 # Calcula o tempo restante
-                 expiration_time = result_data['created_at'] + timedelta(minutes=RESULT_EXPIRATION_MINUTES)
-                 time_left = expiration_time - datetime.now(timezone.utc)
-                 response["expires_in"] = max(0, int(time_left.total_seconds()))
-             else:
-                 # Se o resultado expirou mas o status ainda é 'completed', informa que expirou
-                 response['status'] = 'expired' # Atualiza o status na resposta
-                 response['message'] = 'O resultado expirou.'
-                 # Opcional: Atualizar o status da tarefa no backend para 'expired'
-                 # update_task_status(task_id, 'expired', message='Resultado expirado.')
+            # Verifica se o resultado ainda existe e não expirou antes de fornecer a URL
+            result_data = get_result(result_id) # get_result já lida com expiração
+            if result_data:
+                response["download_url"] = f"/download/{result_id}"
+                # Calcula o tempo restante
+                expiration_time = result_data['created_at'] + timedelta(minutes=RESULT_EXPIRATION_MINUTES)
+                time_left = expiration_time - datetime.now(timezone.utc)
+                response["expires_in"] = max(0, int(time_left.total_seconds()))
+            else:
+                # Se o resultado expirou mas o status ainda é 'completed', informa que expirou
+                response['status'] = 'expired' # Atualiza o status na resposta
+                response['message'] = 'O resultado expirou.'
+                # Atualizar o status da tarefa no backend para 'expired'
+                update_task_status(task_id, 'expired', message='Resultado expirado.')
         else:
-             # Caso raro: status completed mas sem result_id
-             response['status'] = 'failed'
-             response['error'] = 'Erro interno: Concluído sem resultado associado.'
+            # Caso raro: status completed mas sem result_id
+            response['status'] = 'failed'
+            response['error'] = 'Erro interno: Concluído sem resultado associado.'
 
     elif status == 'failed':
         response["error"] = status_info.get('error', 'Falha desconhecida')
@@ -418,10 +447,10 @@ def get_analysis_status(task_id):
     elif status == 'processing':
         response["message"] = status_info.get('message', 'Processando...')
     elif status == 'pending':
-         response["message"] = status_info.get('message', 'Aguardando início do processamento...')
+        response["message"] = status_info.get('message', 'Aguardando início do processamento...')
     else: # Estado desconhecido
-         response['status'] = 'unknown'
-         response['message'] = 'Estado da tarefa desconhecido.'
+        response['status'] = 'unknown'
+        response['message'] = 'Estado da tarefa desconhecido.'
 
 
     return jsonify(response), 200

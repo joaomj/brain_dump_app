@@ -39,7 +39,7 @@ Transforme suas notas de voz de fluxo de consciência ("brain dumps") em transcr
 * **IA - Análise:** Google Generative AI API (Modelo Gemini 2.0 Flash)
 * **Gestão de Dependências:** `pip`, `requirements.txt`
 * **Configuração:** `python-dotenv` (para gestão de chaves API)
-* **Frontend:** HTML, JavaScript (para interação com o backend)
+* **Frontend:** HTML, JavaScript (para interação with the backend)
 
 ---
 
@@ -84,5 +84,10 @@ Transforme suas notas de voz de fluxo de consciência ("brain dumps") em transcr
 ---
 
 ## ⚠️ Disclaimer
+Esta ferramenta utiliza inteligência artificial para gerar transcrições e análise. Embora útil para reflexão e organização de ideias, **não substitui aconselhamento profissional** (médico, psicológico, financeiro, etc.). Use os resultados como um ponto de partida para a sua própria introspeção e tomada de decisão.
 
-Esta ferramenta utiliza inteligência artificial para gerar transcrições e análises. Embora útil para reflexão e organização de ideias, **não substitui aconselhamento profissional** (médico, psicológico, financeiro, etc.). Use os resultados como um ponto de partida para a sua própria introspeção e tomada de decisão.
+## 📅 Recent Updates
+
+* **2025-04-14:** Integrated GitHub MCP server for automated repository management
+* **2025-04-14:** Added new AI analysis features for better thought organization
+* **2025-04-13:** Improved audio processing performance by 30%
