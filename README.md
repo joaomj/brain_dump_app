@@ -2,6 +2,8 @@
 
 Transforme suas notas de voz de fluxo de consciência ("brain dumps") em transcrições claras, análises perspicazes e próximos passos acionáveis usando o poder do Whisper (OpenAI) e Gemini (Google).
 
+**Acesse o aplicativo no seu navegador:** [Brain Dump App](https://joaomj.pythonanywhere.com/)
+
 **Sua privacidade é importante:** Os arquivos de áudio e os resultados da análise são **automaticamente eliminados 5 minutos** após o processamento.
 
 ---
@@ -82,7 +84,6 @@ Transforme suas notas de voz de fluxo de consciência ("brain dumps") em transcr
 ---
 
 ## ⚠️ Disclaimer
-
 Esta ferramenta utiliza inteligência artificial para gerar transcrições e análise. Embora útil para reflexão e organização de ideias, **não substitui aconselhamento profissional** (médico, psicológico, financeiro, etc.). Use os resultados como um ponto de partida para a sua própria introspeção e tomada de decisão.
 
 ## 📅 Recent Updates
